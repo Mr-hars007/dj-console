@@ -390,6 +390,55 @@ export const DJWaveform: React.FC<DJWaveformProps> = ({ deck, color, isPoweredOn
   const isDraggingOverviewRef = useRef(false);
   const lastXRef = useRef(0);
   const lastTimeRef = useRef(0);
+  const moveHistoryRef = useRef<Array<{ x: number; time: number }>>([]);
+  const wheelTimeoutRef = useRef<number | null>(null);
+  const wheelVelocityRef = useRef<number>(0);
+  const lastWheelTimeRef = useRef<number>(0);
+
+  useEffect(() => {
+    return () => {
+      if (wheelTimeoutRef.current !== null) {
+        clearTimeout(wheelTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (!deck || !deck.buffer || !isPoweredOn) return;
+    e.preventDefault();
+
+    const now = performance.now();
+    const dt = Math.max(0.008, Math.min(0.05, (now - lastWheelTimeRef.current) / 1000));
+    lastWheelTimeRef.current = now;
+
+    const mult = e.deltaMode === 1 ? 24 : e.deltaMode === 2 ? 240 : 1;
+    const dx = (e.deltaX || 0) * mult;
+    const dy = (e.deltaY || 0) * mult;
+    if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05) return;
+
+    // Trackpad gesture: swiping forward/up or right scrubs forward; swiping backward/down or left scrubs reverse
+    const deltaDegrees = (dy * 1.2) - (dx * 0.8);
+    deck.scratchRotate(deltaDegrees, dt);
+
+    const instantVelocity = deltaDegrees / dt;
+    wheelVelocityRef.current = wheelVelocityRef.current * 0.35 + instantVelocity * 0.65;
+
+    if (wheelTimeoutRef.current !== null) {
+      clearTimeout(wheelTimeoutRef.current);
+    }
+
+    // Only when lifting finger (wheel stops for 65ms): trigger coasting inertia!
+    wheelTimeoutRef.current = window.setTimeout(() => {
+      const vel = wheelVelocityRef.current;
+      wheelVelocityRef.current = 0;
+      wheelTimeoutRef.current = null;
+      if (Math.abs(vel) > 25) {
+        deck.startInertialCoasting(vel);
+      } else {
+        deck.releaseScratch(false);
+      }
+    }, 65);
+  };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!deck || !deck.buffer) return;
@@ -406,6 +455,7 @@ export const DJWaveform: React.FC<DJWaveformProps> = ({ deck, color, isPoweredOn
 
     lastXRef.current = e.clientX;
     lastTimeRef.current = performance.now();
+    moveHistoryRef.current = [{ x: e.clientX, time: lastTimeRef.current }];
 
     if (clickY <= 24) {
       // Clicked on mini-overview strip: scrub across entire track
@@ -446,11 +496,14 @@ export const DJWaveform: React.FC<DJWaveformProps> = ({ deck, color, isPoweredOn
       const dx = e.clientX - lastXRef.current;
       lastXRef.current = e.clientX;
 
+      moveHistoryRef.current.push({ x: e.clientX, time: now });
+      moveHistoryRef.current = moveHistoryRef.current.filter((item) => now - item.time <= 100);
+
       if (Math.abs(dx) < 0.2) return;
 
       const zoomSeconds = 8;
-      // Dragging right pulls earlier time toward needle (-delta), dragging left pulls forward (+delta)
-      const deltaSeconds = -(dx / rect.width) * zoomSeconds;
+      // Dragging right scrubs forward (+delta), dragging left scrubs reverse (-delta)
+      const deltaSeconds = (dx / rect.width) * zoomSeconds;
       deck.scrubDelta(deltaSeconds, dt);
     }
   };
@@ -463,7 +516,28 @@ export const DJWaveform: React.FC<DJWaveformProps> = ({ deck, color, isPoweredOn
     } catch (_) {}
 
     if (isDraggingWaveformRef.current && deck) {
-      deck.releaseScratch();
+      const now = performance.now();
+      const history = moveHistoryRef.current.filter((item) => now - item.time <= 100);
+      let triggeredInertia = false;
+      if (history.length >= 2 && canvasRef.current) {
+        const oldest = history[0];
+        const newest = history[history.length - 1];
+        const dt = (newest.time - oldest.time) / 1000;
+        if (dt > 0.01) {
+          const totalDx = newest.x - oldest.x;
+          const rect = canvasRef.current.getBoundingClientRect();
+          const zoomSeconds = 8;
+          const velocitySecPerSec = (totalDx / rect.width / dt) * zoomSeconds;
+          const angularSpeed = (velocitySecPerSec / 1.8) * 360; // deg/sec
+          if (Math.abs(angularSpeed) > 25) {
+            deck.startInertialCoasting(angularSpeed);
+            triggeredInertia = true;
+          }
+        }
+      }
+      if (!triggeredInertia) {
+        deck.releaseScratch(false);
+      }
     }
 
     isDraggingWaveformRef.current = false;
@@ -472,6 +546,7 @@ export const DJWaveform: React.FC<DJWaveformProps> = ({ deck, color, isPoweredOn
 
   return (
     <div
+      onWheel={handleWheel}
       className={`relative w-full h-22 sm:h-24 md:h-26 border border-[#232534] bg-[#07080d] shadow-inner select-none touch-none transition-opacity duration-300 ${
         isPoweredOn
           ? 'cursor-grab active:cursor-grabbing'
@@ -479,7 +554,7 @@ export const DJWaveform: React.FC<DJWaveformProps> = ({ deck, color, isPoweredOn
       }`}
       title={
         isPoweredOn
-          ? 'Click & Drag to scrub and slide the waveform (Top strip = full overview, Main wave = precision scrub)'
+          ? 'Click & Drag or 2-finger scroll to scrub waveform (Top strip = full overview, Main wave = precision scrub)'
           : 'Deck Off'
       }
     >

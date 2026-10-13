@@ -42,6 +42,14 @@ export class KeyboardController {
   private lastTrackpadMoveTime: number = 0;
   private lastPointerX: number | null = null;
   private lastPointerY: number | null = null;
+  private wheelTimeoutA: number | null = null;
+  private wheelTimeoutB: number | null = null;
+  private wheelVelocityA: number = 0;
+  private wheelVelocityB: number = 0;
+  private pointerTimeoutA: number | null = null;
+  private pointerTimeoutB: number | null = null;
+  private pointerVelocityA: number = 0;
+  private pointerVelocityB: number = 0;
 
   // Arrow Key Scratch State
   private arrowScratchAnimId: number | null = null;
@@ -93,6 +101,26 @@ export class KeyboardController {
     this.jDidScratch = false;
     this.lastPointerX = null;
     this.lastPointerY = null;
+    if (this.wheelTimeoutA !== null) {
+      clearTimeout(this.wheelTimeoutA);
+      this.wheelTimeoutA = null;
+    }
+    if (this.wheelTimeoutB !== null) {
+      clearTimeout(this.wheelTimeoutB);
+      this.wheelTimeoutB = null;
+    }
+    if (this.pointerTimeoutA !== null) {
+      clearTimeout(this.pointerTimeoutA);
+      this.pointerTimeoutA = null;
+    }
+    if (this.pointerTimeoutB !== null) {
+      clearTimeout(this.pointerTimeoutB);
+      this.pointerTimeoutB = null;
+    }
+    this.wheelVelocityA = 0;
+    this.wheelVelocityB = 0;
+    this.pointerVelocityA = 0;
+    this.pointerVelocityB = 0;
     this.stopArrowScratchLoop(false);
     if (this.mixer.deckA?.pitchBendDelta !== 0) {
       this.mixer.deckA?.pitchBend(0);
@@ -799,11 +827,41 @@ export class KeyboardController {
     if (this.isFScratchHeld && this.mixer.deckA) {
       this.fDidScratch = true;
       this.mixer.deckA.scratchRotate(deltaDegrees, dt);
+      const instantVel = deltaDegrees / dt;
+      this.pointerVelocityA = this.pointerVelocityA * 0.35 + instantVel * 0.65;
+      if (this.pointerTimeoutA !== null) clearTimeout(this.pointerTimeoutA);
+      this.pointerTimeoutA = window.setTimeout(() => {
+        const vel = this.pointerVelocityA;
+        this.pointerVelocityA = 0;
+        this.pointerTimeoutA = null;
+        if (this.mixer.deckA && this.isFScratchHeld) {
+          if (Math.abs(vel) > 25) {
+            this.mixer.deckA.startInertialCoasting(vel);
+          } else {
+            this.mixer.deckA.releaseScratch(false);
+          }
+        }
+      }, 65);
     }
 
     if (this.isJScratchHeld && this.mixer.deckB) {
       this.jDidScratch = true;
       this.mixer.deckB.scratchRotate(deltaDegrees, dt);
+      const instantVel = deltaDegrees / dt;
+      this.pointerVelocityB = this.pointerVelocityB * 0.35 + instantVel * 0.65;
+      if (this.pointerTimeoutB !== null) clearTimeout(this.pointerTimeoutB);
+      this.pointerTimeoutB = window.setTimeout(() => {
+        const vel = this.pointerVelocityB;
+        this.pointerVelocityB = 0;
+        this.pointerTimeoutB = null;
+        if (this.mixer.deckB && this.isJScratchHeld) {
+          if (Math.abs(vel) > 25) {
+            this.mixer.deckB.startInertialCoasting(vel);
+          } else {
+            this.mixer.deckB.releaseScratch(false);
+          }
+        }
+      }, 65);
     }
   };
 
@@ -836,11 +894,41 @@ export class KeyboardController {
     if (this.isFScratchHeld && this.mixer.deckA) {
       this.fDidScratch = true;
       this.mixer.deckA.scratchRotate(deltaDegrees, dt);
+      const instantVel = deltaDegrees / dt;
+      this.pointerVelocityA = this.pointerVelocityA * 0.35 + instantVel * 0.65;
+      if (this.pointerTimeoutA !== null) clearTimeout(this.pointerTimeoutA);
+      this.pointerTimeoutA = window.setTimeout(() => {
+        const vel = this.pointerVelocityA;
+        this.pointerVelocityA = 0;
+        this.pointerTimeoutA = null;
+        if (this.mixer.deckA && this.isFScratchHeld) {
+          if (Math.abs(vel) > 25) {
+            this.mixer.deckA.startInertialCoasting(vel);
+          } else {
+            this.mixer.deckA.releaseScratch(false);
+          }
+        }
+      }, 65);
     }
 
     if (this.isJScratchHeld && this.mixer.deckB) {
       this.jDidScratch = true;
       this.mixer.deckB.scratchRotate(deltaDegrees, dt);
+      const instantVel = deltaDegrees / dt;
+      this.pointerVelocityB = this.pointerVelocityB * 0.35 + instantVel * 0.65;
+      if (this.pointerTimeoutB !== null) clearTimeout(this.pointerTimeoutB);
+      this.pointerTimeoutB = window.setTimeout(() => {
+        const vel = this.pointerVelocityB;
+        this.pointerVelocityB = 0;
+        this.pointerTimeoutB = null;
+        if (this.mixer.deckB && this.isJScratchHeld) {
+          if (Math.abs(vel) > 25) {
+            this.mixer.deckB.startInertialCoasting(vel);
+          } else {
+            this.mixer.deckB.releaseScratch(false);
+          }
+        }
+      }, 65);
     }
   };
 
@@ -864,17 +952,47 @@ export class KeyboardController {
     const dy = (e.deltaY || 0) * mult;
     if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05) return;
 
-    // Two-finger scroll up (dy < 0) pushes record forward; scroll down (dy > 0) pulls reverse
-    const deltaDegrees = (-dy * 1.2) + (dx * 0.8);
+    // Trackpad gesture: swiping forward/up or right scrubs forward; swiping backward/down or left scrubs reverse
+    const deltaDegrees = (dy * 1.2) - (dx * 0.8);
 
     if (this.isFScratchHeld && this.mixer.deckA) {
       this.fDidScratch = true;
       this.mixer.deckA.scratchRotate(deltaDegrees, dt);
+      const instantVel = deltaDegrees / dt;
+      this.wheelVelocityA = this.wheelVelocityA * 0.35 + instantVel * 0.65;
+      if (this.wheelTimeoutA !== null) clearTimeout(this.wheelTimeoutA);
+      this.wheelTimeoutA = window.setTimeout(() => {
+        const vel = this.wheelVelocityA;
+        this.wheelVelocityA = 0;
+        this.wheelTimeoutA = null;
+        if (this.mixer.deckA && this.isFScratchHeld) {
+          if (Math.abs(vel) > 25) {
+            this.mixer.deckA.startInertialCoasting(vel);
+          } else {
+            this.mixer.deckA.releaseScratch(false);
+          }
+        }
+      }, 65);
     }
 
     if (this.isJScratchHeld && this.mixer.deckB) {
       this.jDidScratch = true;
       this.mixer.deckB.scratchRotate(deltaDegrees, dt);
+      const instantVel = deltaDegrees / dt;
+      this.wheelVelocityB = this.wheelVelocityB * 0.35 + instantVel * 0.65;
+      if (this.wheelTimeoutB !== null) clearTimeout(this.wheelTimeoutB);
+      this.wheelTimeoutB = window.setTimeout(() => {
+        const vel = this.wheelVelocityB;
+        this.wheelVelocityB = 0;
+        this.wheelTimeoutB = null;
+        if (this.mixer.deckB && this.isJScratchHeld) {
+          if (Math.abs(vel) > 25) {
+            this.mixer.deckB.startInertialCoasting(vel);
+          } else {
+            this.mixer.deckB.releaseScratch(false);
+          }
+        }
+      }, 65);
     }
   };
 

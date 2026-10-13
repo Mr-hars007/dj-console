@@ -199,8 +199,8 @@
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/<your-username>/DJ.git
-   cd DJ
+   git clone https://github.com/Mr-hars007/dj-console.git
+   cd dj-console
    ```
 
 2. Install dependencies:

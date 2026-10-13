@@ -574,9 +574,9 @@ export class DeckAudio {
       return;
     }
 
-    // If release was preceded by a fast flick/throw (> 130 deg/sec = ~22 RPM), trigger physical spinback coasting!
+    // If release was preceded by scrubbing motion (> 25 deg/sec), trigger physical inertia coasting!
     const throwSpeed = Math.abs(this.lastScratchVelocity);
-    if (allowInertia && throwSpeed > 130) {
+    if (allowInertia && throwSpeed > 25) {
       this.startInertialCoasting(this.lastScratchVelocity);
       this.lastScratchVelocity = 0;
       return;

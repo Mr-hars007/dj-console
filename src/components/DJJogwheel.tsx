@@ -160,6 +160,61 @@ export const DJJogwheel: React.FC<DJJogwheelProps> = ({ deck, accentColor, isPow
   }, [deck]);
 
   const lastTimeRef = useRef<number>(0);
+  const moveHistoryRef = useRef<Array<{ angle: number; time: number; delta: number }>>([]);
+  const wheelTimeoutRef = useRef<number | null>(null);
+  const wheelVelocityRef = useRef<number>(0);
+  const lastWheelTimeRef = useRef<number>(0);
+
+  useEffect(() => {
+    return () => {
+      if (wheelTimeoutRef.current !== null) {
+        clearTimeout(wheelTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (!deck || !isPoweredOn) return;
+    e.preventDefault();
+
+    const now = performance.now();
+    const dtSeconds = Math.max(0.008, Math.min(0.05, (now - lastWheelTimeRef.current) / 1000));
+    lastWheelTimeRef.current = now;
+
+    const mult = e.deltaMode === 1 ? 24 : e.deltaMode === 2 ? 240 : 1;
+    const dx = (e.deltaX || 0) * mult;
+    const dy = (e.deltaY || 0) * mult;
+    if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05) return;
+
+    // Trackpad gesture: swiping forward/up or right scrubs forward; swiping backward/down or left scrubs reverse
+    const delta = (dy * 1.2) - (dx * 0.8);
+
+    rotationAngleRef.current = (rotationAngleRef.current + delta) % 360;
+    if (vinylRef.current) {
+      vinylRef.current.style.transform = `rotate(${rotationAngleRef.current}deg)`;
+    }
+
+    deck.scratchRotate(delta, dtSeconds);
+
+    const instantVelocity = delta / dtSeconds;
+    wheelVelocityRef.current = wheelVelocityRef.current * 0.35 + instantVelocity * 0.65;
+
+    if (wheelTimeoutRef.current !== null) {
+      clearTimeout(wheelTimeoutRef.current);
+    }
+
+    // Only when lifting finger (wheel stops for 65ms): trigger coasting inertia!
+    wheelTimeoutRef.current = window.setTimeout(() => {
+      const vel = wheelVelocityRef.current;
+      wheelVelocityRef.current = 0;
+      wheelTimeoutRef.current = null;
+      if (Math.abs(vel) > 25) {
+        deck.startInertialCoasting(vel);
+      } else {
+        deck.releaseScratch(false);
+      }
+    }, 65);
+  };
 
   // Calculate angle of pointer relative to jogwheel center
   const getAngleFromCenter = (clientX: number, clientY: number) => {
@@ -176,6 +231,7 @@ export const DJJogwheel: React.FC<DJJogwheelProps> = ({ deck, accentColor, isPow
     setIsScratching(true);
     lastAngleRef.current = getAngleFromCenter(e.clientX, e.clientY);
     lastTimeRef.current = performance.now();
+    moveHistoryRef.current = [{ angle: lastAngleRef.current, time: lastTimeRef.current, delta: 0 }];
     if (deck) {
       deck.holdPlatter();
     }
@@ -203,6 +259,9 @@ export const DJJogwheel: React.FC<DJJogwheelProps> = ({ deck, accentColor, isPow
     }
     lastAngleRef.current = currentAngle;
 
+    moveHistoryRef.current.push({ angle: currentAngle, time: now, delta });
+    moveHistoryRef.current = moveHistoryRef.current.filter((item) => now - item.time <= 100);
+
     // Immediate scratch manipulation of audio and playhead position
     deck.scratchRotate(delta, dtSeconds);
   };
@@ -221,7 +280,28 @@ export const DJJogwheel: React.FC<DJJogwheelProps> = ({ deck, accentColor, isPow
       scratchTimeoutRef.current = null;
     }
     if (deck) {
-      deck.releaseScratch(true);
+      const now = performance.now();
+      const history = moveHistoryRef.current.filter((item) => now - item.time <= 100);
+      let triggeredInertia = false;
+      if (history.length >= 2) {
+        const oldest = history[0];
+        const newest = history[history.length - 1];
+        const dt = (newest.time - oldest.time) / 1000;
+        if (dt > 0.01) {
+          let totalDelta = 0;
+          for (let i = 1; i < history.length; i++) {
+            totalDelta += history[i].delta;
+          }
+          const angularSpeed = totalDelta / dt;
+          if (Math.abs(angularSpeed) > 25) {
+            deck.startInertialCoasting(angularSpeed);
+            triggeredInertia = true;
+          }
+        }
+      }
+      if (!triggeredInertia) {
+        deck.releaseScratch(false);
+      }
     }
   };
 
@@ -240,11 +320,13 @@ export const DJJogwheel: React.FC<DJJogwheelProps> = ({ deck, accentColor, isPow
   return (
     <div
       ref={containerRef}
+      onWheel={handleWheel}
       className="flex-1 min-w-0 h-full flex items-center justify-center select-none py-1 w-full overflow-hidden"
     >
       {/* Flagship Large Jogwheel Platter Chassis - Strictly 1:1 Perfect Circle */}
       <div
         ref={platterRef}
+        onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

@@ -22,6 +22,34 @@ export function App() {
   });
   const [showAudioConfig, setShowAudioConfig] = useState<boolean>(false);
 
+  // Fullscreen state tracking: 90% zoom in non-fullscreen mode, 100% zoom in fullscreen mode
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(() => {
+    return typeof document !== 'undefined' ? !!document.fullscreenElement : false;
+  });
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.body.style.zoom = isFullscreen ? '1' : '0.9';
+    }
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.body.style.zoom = '1';
+      }
+    };
+  }, [isFullscreen]);
+
   const handleToggleAutoFullscreen = (val: boolean) => {
     setAutoFullscreen(val);
     if (typeof window !== 'undefined') {
@@ -152,7 +180,7 @@ export function App() {
         )}, 0 30px 80px rgba(0, 0, 0, 0.95)`;
 
   return (
-    <div className="w-full h-screen max-h-screen bg-[#07080b] text-neutral-200 font-mono flex flex-col p-0 select-none overflow-hidden">
+    <div className="w-full h-full min-h-0 bg-[#07080b] text-neutral-200 font-mono flex flex-col p-0 select-none overflow-hidden">
       {/* Landing Page Standby: Audio Routing, Headphone Preview, Fullscreen & Power On */}
       {!hasStarted && (
         <AudioRoutingConfigModal
